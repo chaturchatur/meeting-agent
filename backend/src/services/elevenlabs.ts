@@ -19,7 +19,7 @@ let audioBuffer: string[] = [];
 let chunkCounter = 0;
 
 /** How many Twilio media chunks to accumulate before sending to ElevenLabs. */
-const FLUSH_EVERY_N_CHUNKS = 50; // ≈ 1 second of audio at 20ms/chunk
+const FLUSH_EVERY_N_CHUNKS = 250; // ≈ 5 seconds of audio at 20ms/chunk
 
 /** Twilio sends μ-law audio at 8000 Hz, mono, 8-bit. */
 const MULAW_SAMPLE_RATE = 8000;
