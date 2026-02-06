@@ -21,6 +21,46 @@ let chunkCounter = 0;
 /** How many Twilio media chunks to accumulate before sending to ElevenLabs. */
 const FLUSH_EVERY_N_CHUNKS = 50; // ≈ 1 second of audio at 20ms/chunk
 
+/** Twilio sends μ-law audio at 8000 Hz, mono, 8-bit. */
+const MULAW_SAMPLE_RATE = 8000;
+const MULAW_CHANNELS = 1;
+const MULAW_BITS_PER_SAMPLE = 8;
+
+/**
+ * Wrap raw μ-law bytes in a valid WAV container so ElevenLabs can decode it.
+ * WAV format code 7 = μ-law.
+ */
+function wrapMulawInWav(rawBytes: Buffer): Buffer {
+  const dataSize = rawBytes.length;
+  const headerSize = 44;
+  const fileSize = headerSize + dataSize;
+  const header = Buffer.alloc(headerSize);
+
+  // RIFF header
+  header.write("RIFF", 0);
+  header.writeUInt32LE(fileSize - 8, 4); // file size minus RIFF header
+  header.write("WAVE", 8);
+
+  // fmt  sub-chunk
+  header.write("fmt ", 12);
+  header.writeUInt32LE(16, 16); // sub-chunk size
+  header.writeUInt16LE(7, 20); // audio format: 7 = μ-law
+  header.writeUInt16LE(MULAW_CHANNELS, 22);
+  header.writeUInt32LE(MULAW_SAMPLE_RATE, 24);
+  header.writeUInt32LE(
+    MULAW_SAMPLE_RATE * MULAW_CHANNELS * (MULAW_BITS_PER_SAMPLE / 8),
+    28
+  ); // byte rate
+  header.writeUInt16LE(MULAW_CHANNELS * (MULAW_BITS_PER_SAMPLE / 8), 32); // block align
+  header.writeUInt16LE(MULAW_BITS_PER_SAMPLE, 34);
+
+  // data sub-chunk
+  header.write("data", 36);
+  header.writeUInt32LE(dataSize, 40);
+
+  return Buffer.concat([header, rawBytes]);
+}
+
 /**
  * Called for every Twilio media message.
  * Accumulates audio and returns a TranscriptSegment when a batch is ready,
@@ -53,15 +93,16 @@ export async function flushTranscription(
   audioBuffer = [];
   chunkCounter = 0;
 
-  // Decode base64 → raw bytes, then wrap in a WAV-like blob for the API
+  // Decode base64 → raw bytes, then wrap in a proper WAV container
   const rawBytes = Buffer.from(combinedBase64, "base64");
+  const wavBytes = wrapMulawInWav(rawBytes);
 
   try {
     const formData = new FormData();
     formData.append(
       "file",
-      new Blob([rawBytes], { type: "audio/x-mulaw" }),
-      "audio.raw"
+      new Blob([new Uint8Array(wavBytes)], { type: "audio/wav" }),
+      "audio.wav"
     );
     formData.append("model_id", "scribe_v1");
     formData.append("num_speakers", "2");
