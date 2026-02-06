@@ -15,11 +15,14 @@ export async function twilioRoutes(app: FastifyInstance) {
     twiml.say("Connected to the meeting agent. Your call is being recorded and transcribed.");
 
     // Open a media stream to our WebSocket server
-    const connect = twiml.connect();
-    connect.stream({
+    const start = twiml.start();
+    start.stream({
       url: `wss://${process.env.BACKEND_HOST}/media-stream`,
       track: "both_tracks",
     });
+
+    // Keep the call alive while streaming (pause indefinitely)
+    twiml.pause({ length: 3600 });
 
     reply.type("text/xml").send(twiml.toString());
   });
