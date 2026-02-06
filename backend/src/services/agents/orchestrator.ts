@@ -29,15 +29,19 @@ export async function runAgents(
     `[orchestrator] Running agents for meeting ${meetingId} (${fullTranscript.length} chars)`
   );
 
+  const agentNames = ["noteAgent", "taskAgent", "gapAgent"];
   const results = await Promise.allSettled([
     generateNotes(meetingId, fullTranscript),
     extractTasks(meetingId, fullTranscript),
     identifyGaps(meetingId, fullTranscript),
   ]);
 
-  for (const r of results) {
+  for (let i = 0; i < results.length; i++) {
+    const r = results[i];
     if (r.status === "rejected") {
-      console.error("[orchestrator] Agent failed:", r.reason);
+      console.error(`[orchestrator] ${agentNames[i]} failed:`, r.reason);
+    } else {
+      console.log(`[orchestrator] ${agentNames[i]} completed successfully`);
     }
   }
 }

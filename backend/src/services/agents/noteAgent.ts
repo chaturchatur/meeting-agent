@@ -53,7 +53,8 @@ export async function generateNotes(
   }
 
   // Upsert notes – delete previous notes for this meeting then insert fresh ones
-  await supabase.from("notes").delete().eq("meeting_id", meetingId);
+  const { error: delError } = await supabase.from("notes").delete().eq("meeting_id", meetingId);
+  if (delError) console.error("[noteAgent] Delete error:", delError.message);
 
   if (sections.length > 0) {
     const rows = sections.map((s) => ({
@@ -62,6 +63,10 @@ export async function generateNotes(
       content: s.content,
     }));
     const { error } = await supabase.from("notes").insert(rows);
-    if (error) console.error("[noteAgent] Insert error:", error);
+    if (error) {
+      console.error("[noteAgent] Insert error:", error.message, error.code);
+    } else {
+      console.log(`[noteAgent] Inserted ${rows.length} note sections for meeting ${meetingId}`);
+    }
   }
 }

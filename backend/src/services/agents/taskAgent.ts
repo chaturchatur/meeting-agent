@@ -60,7 +60,8 @@ export async function extractTasks(
   }
 
   // Replace previous tasks for this meeting
-  await supabase.from("tasks").delete().eq("meeting_id", meetingId);
+  const { error: delError } = await supabase.from("tasks").delete().eq("meeting_id", meetingId);
+  if (delError) console.error("[taskAgent] Delete error:", delError.message);
 
   if (tasks.length > 0) {
     const rows = tasks.map((t) => ({
@@ -74,6 +75,10 @@ export async function extractTasks(
       status: "pending" as const,
     }));
     const { error } = await supabase.from("tasks").insert(rows);
-    if (error) console.error("[taskAgent] Insert error:", error);
+    if (error) {
+      console.error("[taskAgent] Insert error:", error.message, error.code);
+    } else {
+      console.log(`[taskAgent] Inserted ${rows.length} tasks for meeting ${meetingId}`);
+    }
   }
 }

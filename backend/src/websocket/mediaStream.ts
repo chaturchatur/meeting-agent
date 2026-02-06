@@ -53,7 +53,7 @@ export async function mediaStreamWs(app: FastifyInstance) {
               );
 
               // Create a meeting record for this call
-              const { data: meeting } = await supabase
+              const { data: meeting, error: meetingError } = await supabase
                 .from("meetings")
                 .insert({
                   title: `Call ${session.callSid.slice(-6)}`,
@@ -66,7 +66,12 @@ export async function mediaStreamWs(app: FastifyInstance) {
                 .select()
                 .single();
 
-              if (meeting) {
+              if (meetingError) {
+                app.log.error(
+                  { error: meetingError.message, code: meetingError.code, details: meetingError.details },
+                  "Failed to create meeting in Supabase"
+                );
+              } else if (meeting) {
                 session.meetingId = meeting.id;
                 app.log.info({ meetingId: meeting.id }, "Meeting created");
               }
@@ -75,7 +80,16 @@ export async function mediaStreamWs(app: FastifyInstance) {
               session.agentTimer = setInterval(async () => {
                 if (session.meetingId && session.transcriptBuffer.length > 0) {
                   const fullText = session.transcriptBuffer.join(" ");
-                  await runAgents(session.meetingId, fullText);
+                  app.log.info(
+                    { meetingId: session.meetingId, transcriptLength: fullText.length },
+                    "Running periodic agent analysis"
+                  );
+                  try {
+                    await runAgents(session.meetingId, fullText);
+                    app.log.info({ meetingId: session.meetingId }, "Periodic agent analysis completed");
+                  } catch (agentErr) {
+                    app.log.error(agentErr, "Periodic agent analysis failed");
+                  }
                 }
               }, AGENT_INTERVAL_MS);
               break;
@@ -88,8 +102,12 @@ export async function mediaStreamWs(app: FastifyInstance) {
               );
               if (segment && session.meetingId) {
                 session.transcriptBuffer.push(segment.content);
+                app.log.info(
+                  { speaker: segment.speaker, length: segment.content.length },
+                  "Transcript segment received"
+                );
                 // Persist the transcript segment
-                await supabase.from("transcript_segments").insert({
+                const { error: segmentError } = await supabase.from("transcript_segments").insert({
                   meeting_id: session.meetingId,
                   speaker: segment.speaker,
                   content: segment.content,
@@ -97,13 +115,19 @@ export async function mediaStreamWs(app: FastifyInstance) {
                   end_time: segment.end_time,
                   confidence: segment.confidence,
                 });
+                if (segmentError) {
+                  app.log.error(
+                    { error: segmentError.message, code: segmentError.code },
+                    "Failed to insert transcript segment"
+                  );
+                }
               }
               break;
             }
 
             case "stop":
               app.log.info(
-                { callSid: session.callSid },
+                { callSid: session.callSid, meetingId: session.meetingId, segmentsBuffered: session.transcriptBuffer.length },
                 "Media stream stopped"
               );
 
@@ -111,7 +135,7 @@ export async function mediaStreamWs(app: FastifyInstance) {
               const remaining = await flushTranscription();
               if (remaining && session.meetingId) {
                 session.transcriptBuffer.push(remaining.content);
-                await supabase.from("transcript_segments").insert({
+                const { error: flushError } = await supabase.from("transcript_segments").insert({
                   meeting_id: session.meetingId,
                   speaker: remaining.speaker,
                   content: remaining.content,
@@ -119,23 +143,51 @@ export async function mediaStreamWs(app: FastifyInstance) {
                   end_time: remaining.end_time,
                   confidence: remaining.confidence,
                 });
+                if (flushError) {
+                  app.log.error(
+                    { error: flushError.message, code: flushError.code },
+                    "Failed to insert final transcript segment"
+                  );
+                }
               }
 
               // Run agents one final time with the complete transcript
               if (session.meetingId && session.transcriptBuffer.length > 0) {
                 const fullText = session.transcriptBuffer.join(" ");
-                await runAgents(session.meetingId, fullText);
+                app.log.info(
+                  { meetingId: session.meetingId, transcriptLength: fullText.length },
+                  "Running final agent analysis"
+                );
+                try {
+                  await runAgents(session.meetingId, fullText);
+                  app.log.info({ meetingId: session.meetingId }, "Agent analysis completed");
+                } catch (agentErr) {
+                  app.log.error(agentErr, "Agent analysis failed");
+                }
+              } else {
+                app.log.warn(
+                  { meetingId: session.meetingId, segmentsBuffered: session.transcriptBuffer.length },
+                  "Skipping agent analysis — no meeting or empty transcript"
+                );
               }
 
               // Mark the meeting as completed
               if (session.meetingId) {
-                await supabase
+                const { error: endError } = await supabase
                   .from("meetings")
                   .update({
                     status: "completed",
                     end_time: new Date().toISOString(),
                   })
                   .eq("id", session.meetingId);
+                if (endError) {
+                  app.log.error(
+                    { error: endError.message, code: endError.code },
+                    "Failed to mark meeting as completed"
+                  );
+                } else {
+                  app.log.info({ meetingId: session.meetingId }, "Meeting marked as completed");
+                }
               }
 
               if (session.agentTimer) clearInterval(session.agentTimer);

@@ -61,7 +61,8 @@ export async function identifyGaps(
   }
 
   // Replace previous gaps for this meeting
-  await supabase.from("gaps").delete().eq("meeting_id", meetingId);
+  const { error: delError } = await supabase.from("gaps").delete().eq("meeting_id", meetingId);
+  if (delError) console.error("[gapAgent] Delete error:", delError.message);
 
   if (gaps.length > 0) {
     const rows = gaps.map((g) => ({
@@ -72,6 +73,10 @@ export async function identifyGaps(
       priority: g.priority,
     }));
     const { error } = await supabase.from("gaps").insert(rows);
-    if (error) console.error("[gapAgent] Insert error:", error);
+    if (error) {
+      console.error("[gapAgent] Insert error:", error.message, error.code);
+    } else {
+      console.log(`[gapAgent] Inserted ${rows.length} gaps for meeting ${meetingId}`);
+    }
   }
 }

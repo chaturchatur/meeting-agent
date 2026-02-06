@@ -16,7 +16,7 @@ create table if not exists public.profiles (
 -- Meetings
 create table if not exists public.meetings (
   id uuid primary key default gen_random_uuid(),
-  user_id uuid not null references auth.users (id),
+  user_id uuid not null,
   title text not null,
   call_sid text unique,
   status varchar(20) default 'in_progress',
