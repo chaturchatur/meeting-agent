@@ -1,0 +1,67 @@
+/**
+ * Note Agent
+ * Generates meeting notes broken into sections: summary, key_points, decisions.
+ */
+
+import OpenAI from "openai";
+import { supabase } from "../supabase.js";
+
+const openai = new OpenAI();
+
+const SYSTEM_PROMPT = `You are a meeting note-taking assistant.
+Given the transcript of a meeting, produce structured notes in JSON format.
+Return a JSON array of objects, each with:
+  - "section": one of "summary", "key_points", "decisions"
+  - "content": the text for that section
+
+Rules:
+- The summary should be 2-4 sentences.
+- key_points should be a bulleted list (use "- " prefixes).
+- decisions should list any explicit decisions or agreements.
+- If there are no decisions yet, omit that section.
+- Only return the JSON array, nothing else.`;
+
+interface NoteSection {
+  section: "summary" | "key_points" | "decisions";
+  content: string;
+}
+
+export async function generateNotes(
+  meetingId: string,
+  transcript: string
+): Promise<void> {
+  const response = await openai.chat.completions.create({
+    model: "gpt-4o-mini",
+    temperature: 0.3,
+    response_format: { type: "json_object" },
+    messages: [
+      { role: "system", content: SYSTEM_PROMPT },
+      { role: "user", content: `Transcript:\n\n${transcript}` },
+    ],
+  });
+
+  const raw = response.choices[0]?.message?.content;
+  if (!raw) return;
+
+  let sections: NoteSection[];
+  try {
+    const parsed = JSON.parse(raw);
+    sections = Array.isArray(parsed) ? parsed : parsed.notes ?? parsed.sections ?? [];
+  } catch {
+    console.error("[noteAgent] Failed to parse response:", raw);
+    return;
+  }
+
+  // Upsert notes – delete previous notes for this meeting then insert fresh ones
+  await supabase.from("notes").delete().eq("meeting_id", meetingId);
+
+  if (sections.length > 0) {
+    const rows = sections.map((s) => ({
+      meeting_id: meetingId,
+      section: s.section,
+      content: s.content,
+    }));
+    const { error } = await supabase.from("notes").insert(rows);
+    if (error) console.error("[noteAgent] Insert error:", error);
+  }
+}
