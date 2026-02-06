@@ -48,16 +48,27 @@ export async function extractTasks(
   });
 
   const raw = response.choices[0]?.message?.content;
-  if (!raw) return;
+  if (!raw) {
+    console.error("[taskAgent] No response content from OpenAI");
+    return;
+  }
+
+  console.log("[taskAgent] Raw OpenAI response:", raw.slice(0, 500));
 
   let tasks: ExtractedTask[];
   try {
     const parsed = JSON.parse(raw);
-    tasks = Array.isArray(parsed) ? parsed : parsed.tasks ?? [];
+    tasks = Array.isArray(parsed)
+      ? parsed
+      : parsed.tasks ?? parsed.action_items ?? parsed.items
+        ?? Object.values(parsed).find((v) => Array.isArray(v)) as ExtractedTask[]
+        ?? [];
   } catch {
     console.error("[taskAgent] Failed to parse response:", raw);
     return;
   }
+
+  console.log(`[taskAgent] Parsed ${tasks.length} tasks`);
 
   // Replace previous tasks for this meeting
   const { error: delError } = await supabase.from("tasks").delete().eq("meeting_id", meetingId);

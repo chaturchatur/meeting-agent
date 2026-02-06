@@ -41,16 +41,28 @@ export async function generateNotes(
   });
 
   const raw = response.choices[0]?.message?.content;
-  if (!raw) return;
+  if (!raw) {
+    console.error("[noteAgent] No response content from OpenAI");
+    return;
+  }
+
+  console.log("[noteAgent] Raw OpenAI response:", raw.slice(0, 500));
 
   let sections: NoteSection[];
   try {
     const parsed = JSON.parse(raw);
-    sections = Array.isArray(parsed) ? parsed : parsed.notes ?? parsed.sections ?? [];
+    // GPT may wrap the array in various keys — try them all
+    sections = Array.isArray(parsed)
+      ? parsed
+      : parsed.notes ?? parsed.sections ?? parsed.note_sections ?? parsed.meeting_notes
+        ?? Object.values(parsed).find((v) => Array.isArray(v)) as NoteSection[]
+        ?? [];
   } catch {
     console.error("[noteAgent] Failed to parse response:", raw);
     return;
   }
+
+  console.log(`[noteAgent] Parsed ${sections.length} sections`);
 
   // Upsert notes – delete previous notes for this meeting then insert fresh ones
   const { error: delError } = await supabase.from("notes").delete().eq("meeting_id", meetingId);

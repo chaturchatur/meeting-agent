@@ -49,16 +49,28 @@ export async function identifyGaps(
   });
 
   const raw = response.choices[0]?.message?.content;
-  if (!raw) return;
+  if (!raw) {
+    console.error("[gapAgent] No response content from OpenAI");
+    return;
+  }
+
+  console.log("[gapAgent] Raw OpenAI response:", raw.slice(0, 500));
 
   let gaps: IdentifiedGap[];
   try {
     const parsed = JSON.parse(raw);
-    gaps = Array.isArray(parsed) ? parsed : parsed.gaps ?? [];
+    // GPT may wrap the array in various keys — try them all
+    gaps = Array.isArray(parsed)
+      ? parsed
+      : parsed.gaps ?? parsed.follow_ups ?? parsed.followups ?? parsed.identified_gaps
+        ?? Object.values(parsed).find((v) => Array.isArray(v)) as IdentifiedGap[]
+        ?? [];
   } catch {
     console.error("[gapAgent] Failed to parse response:", raw);
     return;
   }
+
+  console.log(`[gapAgent] Parsed ${gaps.length} gaps`);
 
   // Replace previous gaps for this meeting
   const { error: delError } = await supabase.from("gaps").delete().eq("meeting_id", meetingId);
