@@ -2,6 +2,7 @@ import "dotenv/config";
 import Fastify from "fastify";
 import fastifyCors from "@fastify/cors";
 import fastifyWebsocket from "@fastify/websocket";
+import fastifyFormbody from "@fastify/formbody";
 
 import { twilioRoutes } from "./routes/twilio.js";
 import { tokenRoutes } from "./routes/token.js";
@@ -16,6 +17,7 @@ async function main() {
     origin: true, // allow all origins in dev; lock down in production
   });
   await app.register(fastifyWebsocket);
+  await app.register(fastifyFormbody);
 
   // --- Routes ---
   await app.register(twilioRoutes);

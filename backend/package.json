@@ -10,6 +10,7 @@
   },
   "dependencies": {
     "@fastify/cors": "^10.0.0",
+    "@fastify/formbody": "^8.0.2",
     "@fastify/websocket": "^11.0.0",
     "@supabase/supabase-js": "^2.49.0",
     "dotenv": "^16.4.0",
