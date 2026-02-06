@@ -12,14 +12,14 @@ const ELEVENLABS_API_URL = "https://api.elevenlabs.io/v1/speech-to-text";
 const API_KEY = () => process.env.ELEVENLABS_API_KEY!;
 
 /**
- * Internal buffer that collects base64-encoded μ-law audio chunks
- * until we have enough to send a meaningful request.
+ * Internal buffer that collects decoded raw μ-law audio buffers.
+ * We decode each base64 chunk immediately to avoid base64 concatenation issues.
  */
-let audioBuffer: string[] = [];
+let audioBuffer: Buffer[] = [];
 let chunkCounter = 0;
 
 /** How many Twilio media chunks to accumulate before sending to ElevenLabs. */
-const FLUSH_EVERY_N_CHUNKS = 250; // ≈ 5 seconds of audio at 20ms/chunk
+const FLUSH_EVERY_N_CHUNKS = 500; // ≈ 10 seconds of audio at 20ms/chunk
 
 /** Twilio sends μ-law audio at 8000 Hz, mono, 8-bit. */
 const MULAW_SAMPLE_RATE = 8000;
@@ -70,7 +70,8 @@ export async function transcribeAudioChunk(
   base64Audio: string,
   track: string
 ): Promise<Omit<TranscriptSegment, "meeting_id"> | null> {
-  audioBuffer.push(base64Audio);
+  // Decode each chunk immediately to avoid base64 concatenation issues
+  audioBuffer.push(Buffer.from(base64Audio, "base64"));
   chunkCounter++;
 
   if (chunkCounter < FLUSH_EVERY_N_CHUNKS) {
@@ -89,12 +90,13 @@ export async function flushTranscription(
 ): Promise<Omit<TranscriptSegment, "meeting_id"> | null> {
   if (audioBuffer.length === 0) return null;
 
-  const combinedBase64 = audioBuffer.join("");
+  const rawBytes = Buffer.concat(audioBuffer);
   audioBuffer = [];
   chunkCounter = 0;
 
-  // Decode base64 → raw bytes, then wrap in a proper WAV container
-  const rawBytes = Buffer.from(combinedBase64, "base64");
+  console.log(`[elevenlabs] Flushing ${rawBytes.length} bytes of audio (~${(rawBytes.length / MULAW_SAMPLE_RATE).toFixed(1)}s)`);
+
+  // Wrap raw μ-law bytes in a proper WAV container
   const wavBytes = wrapMulawInWav(rawBytes);
 
   try {

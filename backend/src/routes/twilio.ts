@@ -18,7 +18,7 @@ export async function twilioRoutes(app: FastifyInstance) {
     const start = twiml.start();
     start.stream({
       url: `wss://${process.env.BACKEND_HOST}/media-stream`,
-      track: "both_tracks",
+      track: "inbound_track",
     });
 
     // Keep the call alive while streaming (pause indefinitely)
