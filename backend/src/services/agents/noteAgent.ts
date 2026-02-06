@@ -72,7 +72,8 @@ export async function generateNotes(
     const rows = sections.map((s) => ({
       meeting_id: meetingId,
       section: s.section,
-      content: s.content,
+      // If GPT returns content as an array, join it into a single string
+      content: Array.isArray(s.content) ? (s.content as string[]).join("\n") : s.content,
     }));
     const { error } = await supabase.from("notes").insert(rows);
     if (error) {

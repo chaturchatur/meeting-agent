@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useRef } from "react";
 import { supabase } from "@/lib/supabase";
 import type {
   TranscriptSegment,
@@ -11,9 +11,13 @@ import type {
 
 const BACKEND = process.env.NEXT_PUBLIC_BACKEND_URL ?? "http://localhost:3001";
 
+/** How often to poll for updates (ms) */
+const POLL_INTERVAL_MS = 4_000;
+
 /**
  * Subscribes to Supabase Realtime for a given meeting and keeps
  * transcript, notes, tasks, and gaps in sync.
+ * Also polls periodically as a reliable fallback for realtime.
  */
 export function useRealtimeMeeting(meetingId: string | null) {
   const [transcript, setTranscript] = useState<TranscriptSegment[]>([]);
@@ -21,10 +25,11 @@ export function useRealtimeMeeting(meetingId: string | null) {
   const [tasks, setTasks] = useState<MeetingTask[]>([]);
   const [gaps, setGaps] = useState<MeetingGap[]>([]);
   const [loading, setLoading] = useState(false);
+  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  // Fetch initial data when meetingId changes
-  const fetchInitial = useCallback(async (id: string) => {
-    setLoading(true);
+  // Fetch data from the backend API
+  const fetchData = useCallback(async (id: string, isInitial = false) => {
+    if (isInitial) setLoading(true);
     try {
       const res = await fetch(`${BACKEND}/api/meetings/${id}`);
       if (res.ok) {
@@ -37,56 +42,47 @@ export function useRealtimeMeeting(meetingId: string | null) {
     } catch (err) {
       console.error("Failed to fetch meeting data:", err);
     } finally {
-      setLoading(false);
+      if (isInitial) setLoading(false);
     }
   }, []);
 
-  // Subscribe to realtime updates
+  // Subscribe to realtime updates + poll as fallback
   useEffect(() => {
     if (!meetingId) return;
 
-    fetchInitial(meetingId);
+    // Initial fetch
+    fetchData(meetingId, true);
 
+    // Start polling every few seconds for reliable live updates
+    pollRef.current = setInterval(() => {
+      fetchData(meetingId);
+    }, POLL_INTERVAL_MS);
+
+    // Also try Supabase Realtime broadcast (works if triggers are configured)
     const channel = supabase
       .channel(`meeting:${meetingId}`)
       .on(
         "broadcast",
         { event: "INSERT" },
-        (payload: { payload: { table: string; new: Record<string, unknown> } }) => {
-          const p = payload.payload;
-          switch (p.table) {
-            case "transcript_segments":
-              setTranscript((prev) => [...prev, p.new as unknown as TranscriptSegment]);
-              break;
-            case "notes":
-              setNotes((prev) => [...prev, p.new as unknown as MeetingNote]);
-              break;
-            case "tasks":
-              setTasks((prev) => [...prev, p.new as unknown as MeetingTask]);
-              break;
-            case "gaps":
-              setGaps((prev) => [...prev, p.new as unknown as MeetingGap]);
-              break;
-          }
+        () => {
+          // On any broadcast, just refetch to stay in sync
+          fetchData(meetingId);
         }
       )
       .on(
         "broadcast",
         { event: "UPDATE" },
-        (payload: { payload: { table: string; new: Record<string, unknown> } }) => {
-          const p = payload.payload;
-          // For updates (e.g. notes being replaced), just refetch
-          if (p.table === "notes" || p.table === "tasks" || p.table === "gaps") {
-            fetchInitial(meetingId);
-          }
+        () => {
+          fetchData(meetingId);
         }
       )
       .subscribe();
 
     return () => {
+      if (pollRef.current) clearInterval(pollRef.current);
       supabase.removeChannel(channel);
     };
-  }, [meetingId, fetchInitial]);
+  }, [meetingId, fetchData]);
 
   const reset = useCallback(() => {
     setTranscript([]);

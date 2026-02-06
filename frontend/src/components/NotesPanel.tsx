@@ -14,6 +14,26 @@ const sectionLabels: Record<string, string> = {
 
 const sectionOrder = ["summary", "key_points", "decisions"];
 
+/**
+ * Parse note content — handles plain text, JSON arrays, and stringified JSON arrays.
+ * Returns an array of strings (one per line/bullet).
+ */
+function parseContent(content: string): string[] {
+  // Try to parse as JSON array (GPT sometimes returns ["- item1", "- item2"])
+  if (content.trimStart().startsWith("[")) {
+    try {
+      const parsed = JSON.parse(content);
+      if (Array.isArray(parsed)) {
+        return parsed.map((item: string) => String(item));
+      }
+    } catch {
+      // Not valid JSON, treat as plain text
+    }
+  }
+  // Split plain text on newlines for bullet lists
+  return content.split("\n").filter((line) => line.trim().length > 0);
+}
+
 export default function NotesPanel({ notes }: Props) {
   // Group by section
   const grouped = sectionOrder
@@ -44,14 +64,35 @@ export default function NotesPanel({ notes }: Props) {
             <h3 className="text-xs font-semibold uppercase tracking-wider text-amber-400 mb-1.5">
               {sectionLabels[section] ?? section}
             </h3>
-            {items.map((note) => (
-              <div
-                key={note.id}
-                className="text-sm leading-relaxed whitespace-pre-wrap"
-              >
-                {note.content}
-              </div>
-            ))}
+            {items.map((note) => {
+              const lines = parseContent(note.content);
+              const isBulletList = lines.some((l) => l.startsWith("- "));
+
+              if (isBulletList) {
+                return (
+                  <ul key={note.id} className="space-y-1">
+                    {lines.map((line, i) => (
+                      <li
+                        key={i}
+                        className="text-sm leading-relaxed flex items-start gap-2"
+                      >
+                        <span className="text-amber-400 mt-0.5 shrink-0">•</span>
+                        <span>{line.replace(/^-\s*/, "")}</span>
+                      </li>
+                    ))}
+                  </ul>
+                );
+              }
+
+              return (
+                <div
+                  key={note.id}
+                  className="text-sm leading-relaxed whitespace-pre-wrap"
+                >
+                  {lines.join("\n")}
+                </div>
+              );
+            })}
           </div>
         ))}
       </div>
